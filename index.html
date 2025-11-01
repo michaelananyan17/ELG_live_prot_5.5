@@ -134,7 +134,10 @@
             text-align: center;
             font-weight: 600;
             color: #1e40af;
-            width: 100%; /* Adapted for prot_5_3 layout */
+            /* MODIFIED from prot_4: Let flexbox handle the width */
+            flex: 1 1 auto;
+            min-width: 100px;
+            max-width: 250px;
         }
         /* === END: STEP 4 STYLES FROM PROT_4 === */
 
@@ -326,7 +329,7 @@
             <header class="text-center mb-10">
                 <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight">Personalized English Learning</h1>
                 <p id="step-title" class="text-xl font-medium text-indigo-600 mt-2">My Personal Assignment</p>
-                <p class="text-gray-500 mt-1">Topic: <span id="final-topic-display" class="font-semibold text-gray-700"></span> | Level: <span id="final-level-display" class="font-semibold text-gray-700"></span></p>
+                <p class="text-gray-500 mt-1">Topic(s): <span id="final-topic-display" class="font-semibold text-gray-700"></span> | Level: <span id="final-level-display" class="font-semibold text-gray-700"></span></p>
             </header>
             
             <div id="generation-loading" class="text-center p-12 border border-dashed border-gray-300 rounded-lg hidden">
@@ -360,9 +363,6 @@
                 <div class="space-x-4">
                     <button id="step-4-back-to-prev" class="px-6 py-3 text-indigo-600 border border-indigo-600 rounded-lg font-semibold hover:bg-indigo-50 transition duration-150 ease-in-out">
                         Change Criteria
-                    </button>
-                    <button id="step-4-back-to-start" class="px-6 py-3 text-gray-600 border border-gray-400 rounded-lg font-semibold hover:bg-gray-100 transition duration-150 ease-in-out">
-                        Back to Beginning
                     </button>
                 </div>
                 <button id="submit-assignments" class="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150 ease-in-out disabled:opacity-50" disabled>
@@ -753,9 +753,18 @@
             reader.readAsText(file); // Only reading text for prototype simplicity
         }
 
-        // NEW: Function to handle user input changes and store them in appState.userAnswers
-        function handleUserAnswer(assignmentIndex, inputElement, answerType) {
+        // MODIFIED: Function to handle user input changes and store them in appState.userAnswers
+        function handleUserAnswer(assignmentIndex, inputElement, answerType, subIndex = null) {
             appState.userAnswers[assignmentIndex] = appState.userAnswers[assignmentIndex] || {};
+
+            // MODIFIED: Handle VocabularyWords (multi-input)
+            if (subIndex !== null && answerType === 'VocabularyWords') {
+                if (!appState.userAnswers[assignmentIndex].answer) {
+                    appState.userAnswers[assignmentIndex].answer = []; // Initialize as array
+                }
+                appState.userAnswers[assignmentIndex].answer[subIndex] = inputElement.value.trim();
+                return; // Skip other logic
+            }
 
             if (answerType === 'MultipleChoice') {
                 // For MC, the value is the selected option index (0, 1, 2, 3)
@@ -771,20 +780,17 @@
             } else if (answerType === 'GrammarPractice') {
                 // For Grammar, the value is the text input
                 appState.userAnswers[assignmentIndex].answer = inputElement.value.trim();
-            } else if (answerType === 'WritingPrompt' || answerType === 'VocabularyWords') {
+            } else if (answerType === 'WritingPrompt') {
                 // For long-form/ungraded answers, we just store the text
                 appState.userAnswers[assignmentIndex].answer = inputElement.value.trim();
             }
-            
-            // Update the submit button status (optional: if we want to ensure all are answered)
-            // For now, we allow submission even if not all are answered.
         }
 
         // MODIFIED: Function to render interactive elements based on assignment type
         function renderInteractiveElement(assignment, index) {
             const assignmentId = `assignment-${index}`;
             const type = assignment.type;
-            const originalContent = assignment.content;
+            const originalContent = (assignment.question || assignment.content || "").trim(); // MODIFIED: Trim content
             let html = '';
 
             if (type === 'MultipleChoice' && assignment.options && assignment.correctAnswerIndex !== undefined) {
@@ -815,17 +821,50 @@
                 html += '</div>';
 
             } else if (type === 'GrammarPractice' && originalContent) {
-                html += '<p class="text-sm font-semibold text-gray-700 mb-2 mt-2">Your Answer (one word/phrase to complete the sentence):</p>';
-                // MODIFIED: Using .grammar-input class from prot_4
-                html += `
-                    <input type="text" id="${assignmentId}-input" placeholder="Type your word or phrase here..."
-                           class="grammar-input"
-                           oninput="handleUserAnswer(${index}, this, '${type}')"
-                           value="${appState.userAnswers[index]?.answer || ''}">
-                `;
-            } else if (type === 'WritingPrompt' || type === 'VocabularyWords') {
+                // MODIFIED: Implement prot_4 inline style
+                const parts = originalContent.split('___');
+                if (parts.length > 1) {
+                    html += `
+                        <div class="flex items-center space-x-2 flex-wrap">
+                            <span class="text-gray-700">${parts[0].trim()}</span>
+                            <input type="text" id="${assignmentId}-input" data-type="GrammarPractice" class="grammar-input" placeholder="Answer"
+                                   oninput="handleUserAnswer(${index}, this, '${type}')"
+                                   value="${appState.userAnswers[index]?.answer || ''}">
+                            <span class="text-gray-700">${parts[1].trim()}</span>
+                        </div>
+                    `;
+                } else {
+                    // Fallback to original prot_5 behavior if '___' is not found
+                    html += '<p class="text-sm font-semibold text-gray-700 mb-2 mt-2">Your Answer:</p>';
+                    html += `
+                        <input type="text" id="${assignmentId}-input" placeholder="Type your word or phrase here..."
+                               class="grammar-input"
+                               oninput="handleUserAnswer(${index}, this, '${type}')"
+                               value="${appState.userAnswers[index]?.answer || ''}">
+                    `;
+                }
+            } else if (type === 'VocabularyWords' && originalContent) {
+                // MODIFIED: Implement prot_4 multi-input style
+                const lines = originalContent.split('\n').filter(Boolean); // Filter out empty lines
+                const instruction = lines[0] + " (Write one sentence for each word below.)"; // Add clarification
+                const words = lines.slice(1);
+                
+                html += `<p class="text-gray-700 font-medium mb-4">${instruction}</p>`;
+                html += '<div class="space-y-4">';
+                html += words.map((word, vIndex) => {
+                    const savedAnswer = (appState.userAnswers[index]?.answer || [])[vIndex] || '';
+                    return `
+                        <p class="font-semibold">${word}</p>
+                        <textarea id="${assignmentId}-answer-${vIndex}" class="input-style" rows="2" 
+                                  placeholder="Write one sentence using the word..."
+                                  oninput="handleUserAnswer(${index}, this, 'VocabularyWords', ${vIndex})">${savedAnswer}</textarea>
+                    `;
+                }).join('');
+                html += '</div>';
+
+            } else if (type === 'WritingPrompt') {
+                // MODIFIED: Use .input-style class from prot_4
                 html += '<p class="text-sm font-semibold text-gray-700 mb-2 mt-2">Your Response (Ungraded):</p>';
-                // MODIFIED: Using .input-style class from prot_4
                 html += `
                     <textarea id="${assignmentId}-input" rows="5" placeholder="Write your response here..."
                               class="input-style"
@@ -865,11 +904,12 @@
             appState.userAnswers = new Array(appState.generatedAssignments.length).fill(null).map(() => ({ answer: '' }));
             getElement('grading-summary').classList.add('hidden');
 
-            // Populate new header (from prot_4)
-            const topTopicName = appState.selectedTopicIds.length > 0 
-                ? TOPIC_POOL.find(t => t.id === appState.selectedTopicIds[0])?.name || 'Selected Topic'
-                : 'N/A';
-            getElement('final-topic-display').textContent = topTopicName;
+            // MODIFIED (Instruction 1): Populate new header with ALL topics
+            const topicNames = appState.selectedTopicIds.map(id => {
+                return TOPIC_POOL.find(t => t.id === id)?.name;
+            }).filter(Boolean).join(', ') || 'N/A';
+            
+            getElement('final-topic-display').textContent = topicNames;
             getElement('final-level-display').textContent = appState.cefrLevel;
 
             // Color array (from prot_4)
@@ -883,10 +923,10 @@
                 card.className = `assignment-block ${colorClass}`; 
                 card.id = `assignment-card-${index}`; // Keep ID for graders
 
-                // Determine the visible content (either prompt or question for interactive tasks)
+                // MODIFIED (Instruction 2): Trim content to remove indents
                 const assignmentContent = (assignment.type === 'MultipleChoice' || assignment.type === 'GrammarPractice') 
-                    ? assignment.question || assignment.content 
-                    : assignment.content;
+                    ? (assignment.question || assignment.content || "").trim()
+                    : (assignment.content || "").trim();
 
                 const typeName = formatTypeToName(assignment.type); // Use helper
                 const assignmentTitle = assignment.title || 'Assignment';
@@ -914,14 +954,22 @@
             });
         }
         
-        // NEW: Grading Function (Unchanged from prot_5_3, as it's the functional part)
+        // MODIFIED: Grading Function to support new Vocab answer structure
         function gradeAssignments() {
             let correctCount = 0;
             let totalGradable = 0;
             let finalAssignmentText = '';
 
             appState.generatedAssignments.forEach((assignment, index) => {
-                const userAnswer = appState.userAnswers[index]?.answer || '';
+                // MODIFIED: Handle different answer structures
+                let userAnswer;
+                if (assignment.type === 'VocabularyWords') {
+                    const userAnswerArray = appState.userAnswers[index]?.answer || [];
+                    userAnswer = userAnswerArray.filter(Boolean).join(' | ');
+                } else {
+                    userAnswer = appState.userAnswers[index]?.answer || '';
+                }
+
                 const feedbackElement = getElement(`feedback-${index}`);
                 const cardElement = getElement(`assignment-card-${index}`);
                 const type = assignment.type;
@@ -1007,6 +1055,7 @@
                     feedbackElement.classList.remove('hidden');
                     
                     // Prepare final text: Include Prompt and User Response
+                    // (userAnswer string was already correctly assembled for Vocab/Writing)
                     finalAssignmentText += `--- ${assignment.title} (${type}) ---\nPrompt:\n${assignment.content}\n\nUser Response:\n${userAnswer}\n\n(Ungraded)\n\n`;
                 }
             });
@@ -1084,12 +1133,20 @@
             // ********** MODIFIED: Use the 'type' field from FORMAT_POOL **********
             const selectedFormats = appState.selectedFormatIds.map(id => FORMAT_POOL.find(f => f.id === id)).filter(Boolean);
             const formatTypes = selectedFormats.map(f => f.type); // e.g., ['WritingPrompt', 'GrammarPractice']
-            const formatNames = selectedFormats.map(f => f.name); // e.g., ['English Text Topic', 'Grammar Practice']
             // *******************************************************************
+            
+            
+            // MODIFIED (Instruction 5): Ask for 5 MCQs if selected
+            let formatQuery = formatTypes.join(', ');
+            if (formatTypes.includes('MultipleChoice')) {
+                // Replace the single instance with 5 instances
+                formatQuery = formatQuery.replace('MultipleChoice', 'MultipleChoice, MultipleChoice, MultipleChoice, MultipleChoice, MultipleChoice');
+            }
+            const numAssignments = formatQuery.split(', ').length; // Get the new total
 
 
             // Define the JSON structure schema within the system prompt
-            const systemPrompt = `You are an expert English assignment generator. Your task is to create ${formatTypes.length} high-quality, professional English learning assignments based on the user's detailed criteria.
+            const systemPrompt = `You are an expert English assignment generator. Your task is to create ${numAssignments} high-quality, professional English learning assignments based on the user's detailed criteria.
             The user requires the output to be a single, raw JSON object that conforms EXACTLY to the following structure. DO NOT include any explanatory text, markdown, or preamble/postamble outside of the JSON block.
             
             JSON Structure:
@@ -1109,8 +1166,9 @@
             }
             
             Specific content rules:
-            - WritingPrompt/VocabularyWords: Use the 'content' field for the prompt/task. Set correctAnswer/options/correctAnswerIndex to null.
-            - GrammarPractice: Use 'content' for the sentence with a blank/placeholder (e.g., 'She ___ going to the store.') and 'correctAnswer' for the single correct word/phrase (e.g., 'is'). Set options/correctAnswerIndex to null.
+            - WritingPrompt: Use 'content' for the prompt/task. Set correctAnswer/options/correctAnswerIndex to null.
+            - VocabularyWords: Use 'content' for the prompt AND the list of words. The first line is the prompt, subsequent lines are the words (e.g., "Use these words in a sentence:\\n1. Word (n): ...\\n2. Word (v): ..."). Set correctAnswer/options/correctAnswerIndex to null.
+            - GrammarPractice: Use 'content' for the sentence with a '___' blank/placeholder (e.g., 'She ___ going to the store.') and 'correctAnswer' for the single correct word/phrase (e.g., 'is'). Set options/correctAnswerIndex to null.
             - MultipleChoice: Use 'question' for the main text, 'options' for the array, and 'correctAnswerIndex' for the 0-indexed position. Set 'content' and 'correctAnswer' to null.
             `;
             
@@ -1119,9 +1177,7 @@
                 Generate the assignments now.
                 1. Difficulty Level (CEFR): ${level}
                 2. Core Topic(s) (in order of priority): ${topicNames.join(', ')}
-                3. Assignment Formats (requesting the TYPES): ${formatTypes.join(', ')}
-
-                Crucially, use the CEFR level to control vocabulary, grammar complexity, and sentence structure. 
+                3. Assignment Formats (requesting the TYPES): ${formatQuery} Crucially, use the CEFR level to control vocabulary, grammar complexity, and sentence structure. 
                 ${priorityExplanation}
                 ${topicContent}
                 
@@ -1258,7 +1314,6 @@
             
             // Disable buttons during generation
             getElement('step-4-back-to-prev').disabled = true;
-            getElement('step-4-back-to-start').disabled = true; // Disable new button
             getElement('submit-assignments').disabled = true;
 
             // Start the async generation
@@ -1266,7 +1321,6 @@
 
             // Re-enable buttons
             getElement('step-4-back-to-prev').disabled = false;
-            getElement('step-4-back-to-start').disabled = false; // Enable new button
         }
 
         // =====================================================================================================
@@ -1341,7 +1395,7 @@
 
             // Set up Step 4 listeners (MODIFIED)
             getElement('step-4-back-to-prev').addEventListener('click', () => showStep(3));
-            getElement('step-4-back-to-start').addEventListener('click', () => showStep(1)); // Added listener
+            // MODIFIED (Instruction 6): Removed listener for step-4-back-to-start
             getElement('submit-assignments').addEventListener('click', submitAssignments);
 
             // Set up Step 5 listeners
