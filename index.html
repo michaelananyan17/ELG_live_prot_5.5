@@ -757,31 +757,26 @@
         function handleUserAnswer(assignmentIndex, inputElement, answerType, subIndex = null) {
             appState.userAnswers[assignmentIndex] = appState.userAnswers[assignmentIndex] || {};
 
-            // MODIFIED: Handle VocabularyWords (multi-input)
-            if (subIndex !== null && answerType === 'VocabularyWords') {
+            // MODIFIED: Handle multi-input arrays for Vocab, Grammar, and MC
+            if (subIndex !== null) {
                 if (!appState.userAnswers[assignmentIndex].answer) {
                     appState.userAnswers[assignmentIndex].answer = []; // Initialize as array
                 }
-                appState.userAnswers[assignmentIndex].answer[subIndex] = inputElement.value.trim();
+                
+                if (answerType === 'MultipleChoice') {
+                    appState.userAnswers[assignmentIndex].answer[subIndex] = inputElement.value; // Store index
+                    // Visual feedback
+                    const mcqBlock = inputElement.closest('.mcq-block');
+                    mcqBlock.querySelectorAll('.mc-option').forEach(opt => opt.classList.remove('selected-user'));
+                    inputElement.closest('label').classList.add('selected-user');
+                } else {
+                    appState.userAnswers[assignmentIndex].answer[subIndex] = inputElement.value.trim(); // Store text
+                }
                 return; // Skip other logic
             }
-
-            if (answerType === 'MultipleChoice') {
-                // For MC, the value is the selected option index (0, 1, 2, 3)
-                appState.userAnswers[assignmentIndex].answer = inputElement.value;
-                
-                // NEW: Visual feedback for user selection
-                const card = getElement(`assignment-card-${assignmentIndex}`);
-                // Remove selection highlight from all options in this card
-                card.querySelectorAll('.mc-option').forEach(opt => opt.classList.remove('selected-user'));
-                // Add selection highlight to the clicked option
-                inputElement.closest('label').classList.add('selected-user');
-                
-            } else if (answerType === 'GrammarPractice') {
-                // For Grammar, the value is the text input
-                appState.userAnswers[assignmentIndex].answer = inputElement.value.trim();
-            } else if (answerType === 'WritingPrompt') {
-                // For long-form/ungraded answers, we just store the text
+            
+            // Handle single-input types (WritingPrompt)
+            if (answerType === 'WritingPrompt') {
                 appState.userAnswers[assignmentIndex].answer = inputElement.value.trim();
             }
         }
@@ -790,71 +785,80 @@
         function renderInteractiveElement(assignment, index) {
             const assignmentId = `assignment-${index}`;
             const type = assignment.type;
-            const originalContent = (assignment.question || assignment.content || "").trim(); // MODIFIED: Trim content
+            // MODIFIED (Instruction 1): Trim original content
+            const originalContent = (assignment.question || assignment.content || "").trim();
             let html = '';
 
-            if (type === 'MultipleChoice' && assignment.options && assignment.correctAnswerIndex !== undefined) {
-                // Reworked MC layout for better tile presentation (Functionality from prot_5_3 preserved)
-                html += '<div class="grid grid-cols-1 gap-3">';
-                
-                assignment.options.forEach((option, optionIndex) => {
-                    const optionId = `${assignmentId}-option-${optionIndex}`;
-                    // Check if this option was previously selected by the user
-                    const isSelected = appState.userAnswers[index]?.answer === String(optionIndex);
+            // MODIFIED (Instruction 4): New MultipleChoice rendering (5-in-1)
+            if (type === 'MultipleChoice' && assignment.questions && Array.isArray(assignment.questions)) {
+                // Render the main instruction
+                html += `<p class="text-gray-700 font-medium mb-4">${originalContent}</p>`;
+                html += '<div class="space-y-6">'; // Space between each question block
+
+                assignment.questions.forEach((mcq, mcqIndex) => {
+                    html += `<div class="mcq-block p-3 border rounded-lg bg-gray-50" id="${assignmentId}-mcq-${mcqIndex}">`;
+                    html += `<p class="font-medium mb-3">${mcqIndex + 1}. ${mcq.question_text.trim()}</p>`; // Question text
                     
-                    html += `
-                        <label for="${optionId}" 
-                               class="mc-option p-3 rounded-xl border-2 shadow-sm ${isSelected ? 'selected-user' : ''}">
-                            <input type="radio" id="${optionId}" name="${assignmentId}-mc-group" 
-                                   value="${optionIndex}" class="hidden"
-                                   onchange="handleUserAnswer(${index}, this, '${type}')"
-                                   ${isSelected ? 'checked' : ''}>
-                            <div class="flex items-start w-full">
-                                <span class="option-letter mr-3">
-                                    ${String.fromCharCode(65 + optionIndex)}
-                                </span>
-                                <span class="text-gray-800 pt-0.5 flex-1">${option}</span>
+                    // Render the tile-based options
+                    html += '<div class="grid grid-cols-1 gap-3">';
+                    mcq.options.forEach((option, optionIndex) => {
+                        const optionId = `${assignmentId}-mcq-${mcqIndex}-option-${optionIndex}`;
+                        const isSelected = (appState.userAnswers[index]?.answer || [])[mcqIndex] === String(optionIndex);
+                        
+                        html += `
+                            <label for="${optionId}" 
+                                   class="mc-option p-3 rounded-xl border-2 shadow-sm ${isSelected ? 'selected-user' : ''}">
+                                <input type="radio" id="${optionId}" name="assignment-${index}-mc-${mcqIndex}" 
+                                       value="${optionIndex}" class="hidden"
+                                       onchange="handleUserAnswer(${index}, this, '${type}', ${mcqIndex})"
+                                       ${isSelected ? 'checked' : ''}>
+                                <div class="flex items-start w-full">
+                                    <span class="option-letter mr-3">
+                                        ${String.fromCharCode(65 + optionIndex)}
+                                    </span>
+                                    <span class="text-gray-800 pt-0.5 flex-1">${option}</span>
+                                </div>
+                            </label>
+                        `;
+                    });
+                    html += '</div></div>'; // Close gap-3 and mcq-block
+                });
+                html += '</div>'; // Close space-y-6
+
+            // MODIFIED (Instruction 2): New GrammarPractice rendering (5-in-1)
+            } else if (type === 'GrammarPractice' && originalContent) {
+                html += '<div class="space-y-4">';
+                const lines = originalContent.trim().split('\n').filter(Boolean);
+                
+                lines.forEach((line, lineIndex) => {
+                    const parts = line.trim().split('___');
+                    const savedAnswer = (appState.userAnswers[index]?.answer || [])[lineIndex] || '';
+                    if (parts.length > 1) {
+                        html += `
+                            <div class="flex items-center space-x-2 flex-wrap">
+                                <span class="text-gray-700">${lineIndex + 1}. ${parts[0].trim()}</span>
+                                <input type="text" id="${assignmentId}-input-${lineIndex}" class="grammar-input" placeholder="Answer"
+                                       oninput="handleUserAnswer(${index}, this, '${type}', ${lineIndex})"
+                                       value="${savedAnswer}">
+                                <span class="text-gray-700">${parts[1].trim()}</span>
                             </div>
-                        </label>
-                    `;
+                        `;
+                    }
                 });
                 html += '</div>';
 
-            } else if (type === 'GrammarPractice' && originalContent) {
-                // MODIFIED: Implement prot_4 inline style
-                const parts = originalContent.split('___');
-                if (parts.length > 1) {
-                    html += `
-                        <div class="flex items-center space-x-2 flex-wrap">
-                            <span class="text-gray-700">${parts[0].trim()}</span>
-                            <input type="text" id="${assignmentId}-input" data-type="GrammarPractice" class="grammar-input" placeholder="Answer"
-                                   oninput="handleUserAnswer(${index}, this, '${type}')"
-                                   value="${appState.userAnswers[index]?.answer || ''}">
-                            <span class="text-gray-700">${parts[1].trim()}</span>
-                        </div>
-                    `;
-                } else {
-                    // Fallback to original prot_5 behavior if '___' is not found
-                    html += '<p class="text-sm font-semibold text-gray-700 mb-2 mt-2">Your Answer:</p>';
-                    html += `
-                        <input type="text" id="${assignmentId}-input" placeholder="Type your word or phrase here..."
-                               class="grammar-input"
-                               oninput="handleUserAnswer(${index}, this, '${type}')"
-                               value="${appState.userAnswers[index]?.answer || ''}">
-                    `;
-                }
+            // MODIFIED (Instruction 3): New VocabularyWords rendering
             } else if (type === 'VocabularyWords' && originalContent) {
-                // MODIFIED: Implement prot_4 multi-input style
-                const lines = originalContent.split('\n').filter(Boolean); // Filter out empty lines
-                const instruction = lines[0] + " (Write one sentence for each word below.)"; // Add clarification
+                const lines = originalContent.trim().split('\n').filter(Boolean);
+                const instruction = lines[0].trim() + " (Write one sentence for each word below.)";
                 const words = lines.slice(1);
                 
-                html += `<p class="text-gray-700 font-medium mb-4">${instruction}</p>`;
-                html += '<div class="space-y-4">';
+                html += `<p class="text-gray-700 font-medium mb-4">${instruction}</p>`; // The instruction
+                html += '<div class="space-y-4">'; // Container
                 html += words.map((word, vIndex) => {
                     const savedAnswer = (appState.userAnswers[index]?.answer || [])[vIndex] || '';
                     return `
-                        <p class="font-semibold">${word}</p>
+                        <p class="font-semibold">${word.trim()}</p>
                         <textarea id="${assignmentId}-answer-${vIndex}" class="input-style" rows="2" 
                                   placeholder="Write one sentence using the word..."
                                   oninput="handleUserAnswer(${index}, this, 'VocabularyWords', ${vIndex})">${savedAnswer}</textarea>
@@ -863,7 +867,6 @@
                 html += '</div>';
 
             } else if (type === 'WritingPrompt') {
-                // MODIFIED: Use .input-style class from prot_4
                 html += '<p class="text-sm font-semibold text-gray-700 mb-2 mt-2">Your Response (Ungraded):</p>';
                 html += `
                     <textarea id="${assignmentId}-input" rows="5" placeholder="Write your response here..."
@@ -901,7 +904,7 @@
             submitButton.classList.remove('hidden');
 
             // Initialize userAnswers array
-            appState.userAnswers = new Array(appState.generatedAssignments.length).fill(null).map(() => ({ answer: '' }));
+            appState.userAnswers = new Array(appState.generatedAssignments.length).fill(null).map(() => ({ answer: null })); // Use null for array/string flexibility
             getElement('grading-summary').classList.add('hidden');
 
             // MODIFIED (Instruction 1): Populate new header with ALL topics
@@ -923,10 +926,17 @@
                 card.className = `assignment-block ${colorClass}`; 
                 card.id = `assignment-card-${index}`; // Keep ID for graders
 
-                // MODIFIED (Instruction 2): Trim content to remove indents
-                const assignmentContent = (assignment.type === 'MultipleChoice' || assignment.type === 'GrammarPractice') 
-                    ? (assignment.question || assignment.content || "").trim()
-                    : (assignment.content || "").trim();
+                // MODIFIED (Instruction 1 & 3): Handle what content to show in the top block
+                let assignmentContent = "";
+                if (assignment.type === 'WritingPrompt') {
+                    // Only WritingPrompt shows its content here
+                    assignmentContent = (assignment.content || "").trim();
+                } else if (assignment.type === 'MultipleChoice' || assignment.type === 'GrammarPractice') {
+                    // MC and Grammar show their "question" (main instruction) here
+                    // The sub-questions/sentences are rendered in renderInteractiveElement
+                    assignmentContent = (assignment.question || "").trim();
+                }
+                // VocabularyWords shows nothing here, it's all in the interactive element
 
                 const typeName = formatTypeToName(assignment.type); // Use helper
                 const assignmentTitle = assignment.title || 'Assignment';
@@ -954,109 +964,114 @@
             });
         }
         
-        // MODIFIED: Grading Function to support new Vocab answer structure
+        // MODIFIED: Grading Function to support new array-based answers
         function gradeAssignments() {
             let correctCount = 0;
             let totalGradable = 0;
             let finalAssignmentText = '';
 
             appState.generatedAssignments.forEach((assignment, index) => {
-                // MODIFIED: Handle different answer structures
-                let userAnswer;
-                if (assignment.type === 'VocabularyWords') {
-                    const userAnswerArray = appState.userAnswers[index]?.answer || [];
-                    userAnswer = userAnswerArray.filter(Boolean).join(' | ');
-                } else {
-                    userAnswer = appState.userAnswers[index]?.answer || '';
-                }
-
+                const userAnswer = appState.userAnswers[index]?.answer; // This can be a string OR an array
                 const feedbackElement = getElement(`feedback-${index}`);
                 const cardElement = getElement(`assignment-card-${index}`);
                 const type = assignment.type;
-                let isCorrect = false;
 
                 // Reset state
                 feedbackElement.classList.add('hidden');
-                // Use Tailwind classes for the feedback box
                 feedbackElement.className = 'text-sm mt-4 p-3 rounded-lg border-l-4'; 
                 
-                // Clear all prior MC selection coloring
-                document.querySelectorAll(`#assignment-card-${index} .mc-option`).forEach(opt => {
+                // Clear all prior MC selection coloring (now nested)
+                cardElement.querySelectorAll('.mc-option').forEach(opt => {
                     opt.classList.remove('selected-correct', 'selected-incorrect', 'selected-user', 'bg-green-200', 'border-green-600');
                 });
 
 
-                if (type === 'MultipleChoice') {
-                    totalGradable++;
-                    const correctIndex = assignment.correctAnswerIndex;
+                if (type === 'MultipleChoice' && assignment.questions) {
+                    let correctInBlock = 0;
+                    const userAnswerArray = userAnswer || [];
+                    const totalInBlock = assignment.questions.length;
+                    totalGradable += totalInBlock;
                     
-                    if (userAnswer !== '') {
-                        const selectedOptionElement = document.querySelector(`#assignment-card-${index} input[value="${userAnswer}"]`).closest('label');
-                        
-                        // Check correctness
-                        isCorrect = parseInt(userAnswer) === correctIndex;
-                        
-                        if (isCorrect) {
-                            selectedOptionElement.classList.add('selected-correct');
-                            correctCount++;
-                            feedbackElement.textContent = "✅ Correct! Great job!";
-                            feedbackElement.classList.add('bg-green-100', 'text-green-700', 'border-green-500');
-                        } else {
-                            selectedOptionElement.classList.add('selected-incorrect');
-                            feedbackElement.textContent = `❌ Incorrect. The correct answer was: ${assignment.options[correctIndex]}`;
-                            feedbackElement.classList.add('bg-red-100', 'text-red-700', 'border-red-500');
+                    let mcqFinalText = '';
+
+                    assignment.questions.forEach((mcq, mcqIndex) => {
+                        const correctIndex = mcq.correctAnswerIndex;
+                        const userChoice = userAnswerArray[mcqIndex]; // This is the index (e.g., "1")
+                        const optionElements = document.querySelectorAll(`input[name="assignment-${index}-mc-${mcqIndex}"]`);
+                        let isCorrect = false;
+
+                        if (userChoice !== undefined && userChoice !== null) {
+                            const selectedOptionElement = optionElements[userChoice].closest('label');
+                            isCorrect = parseInt(userChoice) === correctIndex;
                             
-                            // Highlight the correct answer with a different, positive style
-                            const correctOptionElement = document.querySelector(`#assignment-card-${index} input[value="${correctIndex}"]`).closest('label');
-                            correctOptionElement.classList.add('bg-green-200', 'border-green-600'); 
-                        }
-                    } else {
-                         // User skipped, but keep the neutral styling
-                         feedbackElement.textContent = "⚠️ Skipped. No answer provided.";
-                         feedbackElement.classList.add('bg-yellow-100', 'text-yellow-700', 'border-yellow-500');
-                    }
-                    feedbackElement.classList.remove('hidden');
-
-                    // Prepare final text: Include Question, User Answer, and Correct Answer
-                    const selectedText = userAnswer !== '' ? assignment.options[parseInt(userAnswer)] : 'N/A';
-                    finalAssignmentText += `--- ${assignment.title} (MC) ---\nQuestion: ${assignment.question}\nYour Answer: ${selectedText}\nCorrect Answer: ${assignment.options[correctIndex]}\nResult: ${isCorrect ? 'Correct' : 'Incorrect'}\n\n`;
-
-                } else if (type === 'GrammarPractice') {
-                    // Simple text comparison for Grammar Practice
-                    totalGradable++;
-                    const expectedAnswer = assignment.correctAnswer.trim().toLowerCase();
-                    const userText = userAnswer.toLowerCase();
-                    
-                    isCorrect = userText === expectedAnswer;
-
-                    if (userAnswer !== '') {
-                        if (isCorrect) {
-                            correctCount++;
-                            feedbackElement.textContent = "✅ Correct! Your response matches the expected answer.";
-                            feedbackElement.classList.add('bg-green-100', 'text-green-700', 'border-green-500');
+                            if (isCorrect) {
+                                selectedOptionElement.classList.add('selected-correct');
+                                correctInBlock++;
+                                correctCount++;
+                            } else {
+                                selectedOptionElement.classList.add('selected-incorrect');
+                                const correctOptionElement = optionElements[correctIndex].closest('label');
+                                correctOptionElement.classList.add('bg-green-200', 'border-green-600'); 
+                            }
                         } else {
-                            feedbackElement.textContent = `❌ Incorrect. The expected answer was: "${assignment.correctAnswer}"`;
-                            feedbackElement.classList.add('bg-red-100', 'text-red-700', 'border-red-500');
+                             // User skipped
                         }
-                    } else {
-                         feedbackElement.textContent = "⚠️ Skipped. No answer provided.";
-                         feedbackElement.classList.add('bg-yellow-100', 'text-yellow-700', 'border-yellow-500');
-                    }
+                        
+                        // Prepare final text
+                        const selectedText = (userChoice !== undefined && userChoice !== null) ? mcq.options[parseInt(userChoice)] : 'N/A';
+                        mcqFinalText += `  Q${mcqIndex + 1}: ${mcq.question_text}\n  Your Answer: ${selectedText}\n  Correct Answer: ${mcq.options[correctIndex]}\n  Result: ${isCorrect ? 'Correct' : 'Incorrect'}\n\n`;
+                    });
+
+                    feedbackElement.textContent = `Result: You answered ${correctInBlock} / ${totalInBlock} questions correctly.`;
+                    feedbackElement.classList.add('bg-gray-100', 'text-gray-700', 'border-gray-400');
                     feedbackElement.classList.remove('hidden');
 
-                    // Prepare final text
-                    finalAssignmentText += `--- ${assignment.title} (Grammar) ---\nPrompt: ${assignment.content}\nYour Answer: ${userAnswer}\nCorrect Answer: ${assignment.correctAnswer}\nResult: ${isCorrect ? 'Correct' : 'Incorrect'}\n\n`;
+                    finalAssignmentText += `--- ${assignment.title} (Multiple Choice) ---\n${mcqFinalText}`;
+
+                } else if (type === 'GrammarPractice' && Array.isArray(assignment.correctAnswer)) {
+                    let correctInBlock = 0;
+                    const userAnswerArray = userAnswer || [];
+                    const expectedAnswerArray = assignment.correctAnswer;
+                    const totalInBlock = expectedAnswerArray.length;
+                    totalGradable += totalInBlock;
+
+                    let grammarFinalText = `Prompt: ${assignment.content.replace(/\n/g, '\n  ')}\n`;
+                    
+                    expectedAnswerArray.forEach((expectedAns, ansIndex) => {
+                        const userAns = (userAnswerArray[ansIndex] || "").trim().toLowerCase();
+                        const correctAns = expectedAns.trim().toLowerCase();
+                        let isCorrect = false;
+
+                        if (userAns === correctAns) {
+                            correctInBlock++;
+                            correctCount++;
+                            isCorrect = true;
+                        }
+                        
+                        grammarFinalText += `  Q${ansIndex + 1}: Your Answer: "${userAnswerArray[ansIndex] || 'N/A'}", Correct: "${expectedAns}", Result: ${isCorrect ? 'Correct' : 'Incorrect'}\n`;
+                    });
+
+                    feedbackElement.textContent = `Result: You answered ${correctInBlock} / ${totalInBlock} questions correctly.`;
+                    feedbackElement.classList.add('bg-gray-100', 'text-gray-700', 'border-gray-400');
+                    feedbackElement.classList.remove('hidden');
+                    
+                    finalAssignmentText += `--- ${assignment.title} (Grammar) ---\n${grammarFinalText}\n`;
 
                 } else {
                     // WritingPrompt/VocabularyWords (Ungraded)
-                    // The LLM does not provide a simple 'correctAnswer' for these, so we just show the user's response.
+                    let userResponseText = '';
+                    if (type === 'VocabularyWords' && Array.isArray(userAnswer)) {
+                        userResponseText = userAnswer.filter(Boolean).join('\n');
+                    } else if (type === 'WritingPrompt') {
+                        userResponseText = userAnswer || '';
+                    }
+
                     feedbackElement.textContent = "📝 This is a long-form assignment and is not automatically graded in this prototype. Review your response below.";
                     feedbackElement.classList.add('bg-gray-100', 'text-gray-600', 'border-gray-400');
                     feedbackElement.classList.remove('hidden');
                     
                     // Prepare final text: Include Prompt and User Response
-                    // (userAnswer string was already correctly assembled for Vocab/Writing)
-                    finalAssignmentText += `--- ${assignment.title} (${type}) ---\nPrompt:\n${assignment.content}\n\nUser Response:\n${userAnswer}\n\n(Ungraded)\n\n`;
+                    finalAssignmentText += `--- ${assignment.title} (${type}) ---\nPrompt:\n${assignment.content}\n\nUser Response:\n${userResponseText}\n\n(Ungraded)\n\n`;
                 }
             });
 
@@ -1130,22 +1145,11 @@
                 ? `Topic 1 (${topicNames[0]}) has a 100% priority weight.`
                 : '';
 
-            // ********** MODIFIED: Use the 'type' field from FORMAT_POOL **********
             const selectedFormats = appState.selectedFormatIds.map(id => FORMAT_POOL.find(f => f.id === id)).filter(Boolean);
-            const formatTypes = selectedFormats.map(f => f.type); // e.g., ['WritingPrompt', 'GrammarPractice']
-            // *******************************************************************
-            
-            
-            // MODIFIED (Instruction 5): Ask for 5 MCQs if selected
-            let formatQuery = formatTypes.join(', ');
-            if (formatTypes.includes('MultipleChoice')) {
-                // Replace the single instance with 5 instances
-                formatQuery = formatQuery.replace('MultipleChoice', 'MultipleChoice, MultipleChoice, MultipleChoice, MultipleChoice, MultipleChoice');
-            }
-            const numAssignments = formatQuery.split(', ').length; // Get the new total
+            const formatTypes = selectedFormats.map(f => f.type);
+            const numAssignments = formatTypes.length;
 
-
-            // Define the JSON structure schema within the system prompt
+            // MODIFIED (Instruction 2 & 4): Define the new JSON structure
             const systemPrompt = `You are an expert English assignment generator. Your task is to create ${numAssignments} high-quality, professional English learning assignments based on the user's detailed criteria.
             The user requires the output to be a single, raw JSON object that conforms EXACTLY to the following structure. DO NOT include any explanatory text, markdown, or preamble/postamble outside of the JSON block.
             
@@ -1155,21 +1159,27 @@
                 {
                   "title": "A concise title for the assignment.",
                   "type": "The exact assignment type, MUST be one of: ${formatTypes.join(', ')}",
-                  "content": "The full instructions or body text for the student. Use \\n for line breaks.",
-                  "question": "The specific question asked to the student (e.g., 'Fill in the blank: ...'). Same as 'content' if content is simple.",
-                  "correctAnswer": "The single correct answer text (for GrammarPractice). Null otherwise.",
-                  "options": "An array of 4 options (strings) for MultipleChoice. Null otherwise.",
-                  "correctAnswerIndex": "The 0-indexed position of the correct option in the 'options' array (for MultipleChoice). Null otherwise."
+                  "content": "The full instructions/body text for WritingPrompt OR the 5 sentences for GrammarPractice (separated by \\n).",
+                  "question": "The main instruction text for MultipleChoice OR GrammarPractice (e.g., 'Choose the best option.' or 'Fill in the blanks.').",
+                  "correctAnswer": "An array of 5 correct answer strings for GrammarPractice (e.g., ["is", "are", "was", "were", "been"]). Null otherwise.",
+                  
+                  "questions": [
+                    {
+                      "question_text": "The text for an individual question.",
+                      "options": ["A", "B", "C", "D"],
+                      "correctAnswerIndex": 0
+                    }
+                  ]
                 },
                 ... (one object for each requested assignment format)
               ]
             }
             
             Specific content rules:
-            - WritingPrompt: Use 'content' for the prompt/task. Set correctAnswer/options/correctAnswerIndex to null.
-            - VocabularyWords: Use 'content' for the prompt AND the list of words. The first line is the prompt, subsequent lines are the words (e.g., "Use these words in a sentence:\\n1. Word (n): ...\\n2. Word (v): ..."). Set correctAnswer/options/correctAnswerIndex to null.
-            - GrammarPractice: Use 'content' for the sentence with a '___' blank/placeholder (e.g., 'She ___ going to the store.') and 'correctAnswer' for the single correct word/phrase (e.g., 'is'). Set options/correctAnswerIndex to null.
-            - MultipleChoice: Use 'question' for the main text, 'options' for the array, and 'correctAnswerIndex' for the 0-indexed position. Set 'content' and 'correctAnswer' to null.
+            - WritingPrompt: Use 'content' for the prompt. Set all other fields to null.
+            - VocabularyWords: Use 'content' for the prompt AND the list of words. The first line is the prompt, subsequent lines are the words (e.g., "Use these words in a sentence:\\n1. Word (n): Definition...\\n2. Word (v): Definition..."). Set all other fields to null.
+            - GrammarPractice: Use 'question' for the main instruction (e.g., "Complete the sentences..."). Use 'content' for the 5 sentences, each separated by \\n and containing a '___' blank. Use 'correctAnswer' for an array of 5 correct strings. Set 'questions' to null.
+            - MultipleChoice: Use 'question' for the main instruction (e.g., "Read and choose..."). Use the 'questions' array to provide 5 individual multiple-choice questions, each with 'question_text', 'options', and 'correctAnswerIndex'. Set 'content' and 'correctAnswer' to null.
             `;
             
             // User Query: Supplies the specific content criteria
@@ -1177,7 +1187,9 @@
                 Generate the assignments now.
                 1. Difficulty Level (CEFR): ${level}
                 2. Core Topic(s) (in order of priority): ${topicNames.join(', ')}
-                3. Assignment Formats (requesting the TYPES): ${formatQuery} Crucially, use the CEFR level to control vocabulary, grammar complexity, and sentence structure. 
+                3. Assignment Formats (requesting the TYPES): ${formatTypes.join(', ')}
+
+                Crucially, use the CEFR level to control vocabulary, grammar complexity, and sentence structure. 
                 ${priorityExplanation}
                 ${topicContent}
                 
